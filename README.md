@@ -6,8 +6,9 @@ later, for online scoring (the decision service). A single implementation of eve
 feature is what guarantees **train/serve parity** — the top failure mode this
 project is designed to avoid.
 
-> Part of the RBA polyrepo. See `../plans/development_plan.md` (sections 3–5) for
-> the rationale.
+> Part of the RBA polyrepo. See `../docs/plans/status.md` for current status and
+> `../docs/plans/development_plan.md` (sections 3–5) for the rationale. Orientation for
+> AI tools: [`AGENTS.md`](AGENTS.md).
 
 ## Layout
 
@@ -45,5 +46,6 @@ pytest
 
 ## Status
 
-Phase 1 scaffold. Schema and `ProfileState` are in place; feature bodies and the
-replay logic are implemented in **Step 4** (after dataset EDA in Step 3).
+**Step 4 complete** — schema, `ProfileState`, the 10-feature `compute_features` /
+`update_profile`, and the replay driver are implemented and covered by the parity
+suite. See `../docs/plans/status.md` for overall project status.
