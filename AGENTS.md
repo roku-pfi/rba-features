@@ -8,9 +8,11 @@ orientation for any AI coding tool. (Cursor users also get `../.cursor/rules/`.)
 
 ## Where we are / where things are stated
 
-**Polyrepo**: `rba-features`, `rba-ml-training`, `docs` are separate git repos cloned
-side-by-side (org `github.com/roku-pfi`). Roadmap/status/decisions live in the **`docs`**
-repo (sibling checkout `../docs`):
+**Polyrepo**: `rba-features`, `rba-contracts`, `rba-ml-training`, `docs` are separate
+git repos cloned side-by-side (org `github.com/roku-pfi`). The feature *schema*
+(names/order/version) is frozen in `../rba-contracts`; this repo is the
+implementation. Roadmap/status/decisions live in the **`docs`** repo (sibling
+checkout `../docs`):
 
 - **Current status & step checklist → `../docs/plans/status.md`** (single source of truth).
 - Phase roadmap & rationale → `../docs/plans/development_plan.md` (§3–5 cover this lib).
