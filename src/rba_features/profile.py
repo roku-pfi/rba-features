@@ -11,38 +11,39 @@ source of "history" both offline and online:
     - Online (serving): materialised in Redis by the profile-service and loaded
       on each request.
 
-Keep this object small and JSON-serialisable: it will be stored per user.
-
-NOTE: the concrete fields below are a starting point for Phase 1 (Step 4) and
-will be refined once EDA (Step 3) tells us which signals actually matter.
+The fields below back the Phase 1 feature set (see features.FEATURE_NAMES), chosen
+from the EDA findings: the faithful per-user "seen-before" signals plus a few
+behavioural ones. RTT and absolute geo distance were intentionally excluded (RTT is
+~94% missing; geo is synthesised and region/city are ~42% missing).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Retain at most this many recent failed-login timestamps per user (bounds memory;
+# only the last 24h are ever counted by the feature).
+_MAX_FAILED_TS = 256
+
 
 @dataclass
 class ProfileState:
-    """Rolling summary of a user's past logins."""
+    """Rolling summary of a user's past logins (state strictly before "now")."""
 
     login_count: int = 0
-    last_login_ts: float | None = None  # epoch seconds
-    last_lat: float | None = None
-    last_lon: float | None = None
+    last_login_ts: float | None = None  # epoch seconds of the most recent prior login
 
-    seen_countries: set[str] = field(default_factory=set)
-    seen_regions: set[str] = field(default_factory=set)
-    seen_cities: set[str] = field(default_factory=set)
     seen_ips: set[str] = field(default_factory=set)
     seen_asns: set[str] = field(default_factory=set)
+    seen_countries: set[str] = field(default_factory=set)
     seen_device_types: set[str] = field(default_factory=set)
     seen_os: set[str] = field(default_factory=set)
     seen_browsers: set[str] = field(default_factory=set)
+    seen_hours: set[int] = field(default_factory=set)
 
-    rtt_sum: float = 0.0
-    rtt_count: int = 0
+    # Epoch seconds of prior failed logins, kept sorted-ish by insertion (append).
+    failed_login_ts: list[float] = field(default_factory=list)
 
-    @property
-    def rtt_mean(self) -> float | None:
-        return self.rtt_sum / self.rtt_count if self.rtt_count else None
+    def trim_failed(self) -> None:
+        if len(self.failed_login_ts) > _MAX_FAILED_TS:
+            self.failed_login_ts = self.failed_login_ts[-_MAX_FAILED_TS:]

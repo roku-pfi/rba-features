@@ -1,54 +1,157 @@
 """Feature functions.
 
 Each feature is a pure function of the current login event and the user's
-ProfileState (history strictly before this event). Implementations land in
-Step 4 of Phase 1, after EDA (Step 3) confirms which signals matter.
+ProfileState (history strictly before this event). `compute_features` and
+`update_profile` are the two entry points used by BOTH the offline replay driver
+and (later) the online decision service — this shared implementation is what
+guarantees train/serve parity.
 
-Design contract (do not break):
-    - A feature reads ONLY `event` and `profile` (no global/current-time state).
-    - `compute_features` and `update_profile` are the two entry points used by
-      both the offline replay driver and the online decision service.
+Contract (do not break):
+    - `compute_features(event, profile)` reads only `event` and `profile`.
+    - `update_profile(profile, event)` is called AFTER compute, so the current
+      event never leaks into its own feature vector.
+
+Feature set (Phase 1, EDA-informed — see docs/findings/2026-08-08-phase1-eda.md):
+    faithful per-user "seen-before" signals + a few behavioural ones. RTT and
+    absolute geo distance were intentionally excluded.
+
+Missing values: geo/UA fields use "-" (and NaN) as "missing" in the raw data. A
+missing categorical is treated as "not seen before" (0) and is NOT added to the
+profile's seen-set, so missingness never counts as a match.
 """
 
 from __future__ import annotations
 
+import math
+from datetime import datetime
 from typing import Any, Mapping
 
 from rba_features.profile import ProfileState
 
-# The initial feature set planned in plans/development_plan.md section 5.
-# Implemented in Step 4.
+# Event field names (canonical snake_case; see schema.RAW_TO_FIELD).
+F_TS = "login_timestamp"
+F_IP = "ip_address"
+F_ASN = "asn"
+F_COUNTRY = "country"
+F_DEVICE = "device_type"
+F_OS = "os"
+F_BROWSER = "browser"
+F_SUCCESS = "login_successful"
+
+_MISSING_TOKENS = {"", "-", "nan", "none", "null"}
+_WINDOW_SECONDS = 24 * 3600
+_NO_PRIOR = -1.0  # sentinel for seconds_since_last_login when there is no prior login
+
 FEATURE_NAMES: tuple[str, ...] = (
-    "device_type_seen_before",
-    "os_seen_before",
-    "browser_seen_before",
+    "user_login_count",
     "ip_seen_before",
     "asn_seen_before",
     "country_seen_before",
-    "region_seen_before",
-    "city_seen_before",
-    "unusual_login_hour",
+    "device_type_seen_before",
+    "os_seen_before",
+    "browser_seen_before",
+    "hour_seen_before",
     "seconds_since_last_login",
-    "distance_from_last_login_km",
-    "impossible_travel",
-    "rtt_deviation_from_user_mean",
-    "failed_logins_last_hour",
-    "user_login_count",
+    "failed_logins_last_24h",
 )
 
 
-def compute_features(event: Mapping[str, Any], profile: ProfileState) -> dict[str, Any]:
-    """Return the feature vector for `event` given the user's prior `profile`.
+def is_missing(value: Any) -> bool:
+    """True for NaN/None/empty or the dataset's "-" placeholder."""
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return str(value).strip().lower() in _MISSING_TOKENS
 
-    Implemented in Step 4.
-    """
-    raise NotImplementedError("Feature computation is implemented in Phase 1, Step 4.")
+
+def to_epoch(ts: Any) -> float | None:
+    """Convert a timestamp (datetime / pandas Timestamp / ISO string) to epoch seconds."""
+    if ts is None:
+        return None
+    if isinstance(ts, (int, float)):
+        return None if (isinstance(ts, float) and math.isnan(ts)) else float(ts)
+    if isinstance(ts, datetime):
+        return ts.timestamp()
+    # pandas Timestamp exposes .timestamp(); NaT raises -> treat as missing.
+    ts_method = getattr(ts, "timestamp", None)
+    if callable(ts_method):
+        try:
+            return float(ts_method())
+        except (ValueError, OverflowError):
+            return None
+    try:
+        return datetime.fromisoformat(str(ts)).timestamp()
+    except ValueError:
+        return None
+
+
+def _hour_of(ts: Any) -> int | None:
+    if isinstance(ts, datetime):
+        return ts.hour
+    hour_attr = getattr(ts, "hour", None)
+    return int(hour_attr) if hour_attr is not None else None
+
+
+def _seen(value: Any, seen: set) -> int:
+    return 0 if is_missing(value) else int(value in seen)
+
+
+def compute_features(event: Mapping[str, Any], profile: ProfileState) -> dict[str, Any]:
+    """Return the feature vector for `event` given the user's prior `profile`."""
+    now = to_epoch(event.get(F_TS))
+    hour = _hour_of(event.get(F_TS))
+
+    if now is not None and profile.last_login_ts is not None:
+        seconds_since = now - profile.last_login_ts
+    else:
+        seconds_since = _NO_PRIOR
+
+    if now is None:
+        failed_24h = 0
+    else:
+        cutoff = now - _WINDOW_SECONDS
+        failed_24h = sum(1 for t in profile.failed_login_ts if t >= cutoff)
+
+    return {
+        "user_login_count": profile.login_count,
+        "ip_seen_before": _seen(event.get(F_IP), profile.seen_ips),
+        "asn_seen_before": _seen(event.get(F_ASN), profile.seen_asns),
+        "country_seen_before": _seen(event.get(F_COUNTRY), profile.seen_countries),
+        "device_type_seen_before": _seen(event.get(F_DEVICE), profile.seen_device_types),
+        "os_seen_before": _seen(event.get(F_OS), profile.seen_os),
+        "browser_seen_before": _seen(event.get(F_BROWSER), profile.seen_browsers),
+        "hour_seen_before": int(hour in profile.seen_hours) if hour is not None else 0,
+        "seconds_since_last_login": seconds_since,
+        "failed_logins_last_24h": failed_24h,
+    }
+
+
+def _add(value: Any, seen: set) -> None:
+    if not is_missing(value):
+        seen.add(value)
 
 
 def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileState:
-    """Fold `event` into `profile`, returning the state that includes it.
+    """Fold `event` into `profile` (mutates and returns it). Call AFTER compute_features."""
+    now = to_epoch(event.get(F_TS))
+    hour = _hour_of(event.get(F_TS))
 
-    Called AFTER `compute_features`, so the current event never leaks into its
-    own feature vector. Implemented in Step 4.
-    """
-    raise NotImplementedError("Profile update is implemented in Phase 1, Step 4.")
+    _add(event.get(F_IP), profile.seen_ips)
+    _add(event.get(F_ASN), profile.seen_asns)
+    _add(event.get(F_COUNTRY), profile.seen_countries)
+    _add(event.get(F_DEVICE), profile.seen_device_types)
+    _add(event.get(F_OS), profile.seen_os)
+    _add(event.get(F_BROWSER), profile.seen_browsers)
+    if hour is not None:
+        profile.seen_hours.add(hour)
+
+    success = event.get(F_SUCCESS)
+    if now is not None and success is False:
+        profile.failed_login_ts.append(now)
+        profile.trim_failed()
+
+    if now is not None:
+        profile.last_login_ts = now
+    profile.login_count += 1
+    return profile
