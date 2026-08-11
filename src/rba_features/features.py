@@ -26,7 +26,7 @@ import math
 from datetime import datetime
 from typing import Any, Mapping
 
-from rba_features.profile import ProfileState
+from rba_features.profile import FREEMAN_COUNT_FEATURES, ProfileState
 
 # Event field names (canonical snake_case; see schema.RAW_TO_FIELD).
 F_TS = "login_timestamp"
@@ -132,6 +132,31 @@ def _add(value: Any, seen: set) -> None:
         seen.add(value)
 
 
+def _freeman_value(feature: str, event: Mapping[str, Any]) -> str | None:
+    """Value string as Freeman offline scoring would see it (`astype(str)`), or None to skip.
+
+    Missing categoricals are skipped so they never inflate user counts (matches
+    seen-set policy). `hour` is always the decimal hour string when timestamp parses.
+    """
+    if feature == "hour":
+        hour = _hour_of(event.get(F_TS))
+        return None if hour is None else str(int(hour))
+    raw = event.get(feature)
+    if is_missing(raw):
+        return None
+    return str(raw)
+
+
+def _bump_freeman_counts(profile: ProfileState, event: Mapping[str, Any]) -> None:
+    for feature in FREEMAN_COUNT_FEATURES:
+        value = _freeman_value(feature, event)
+        if value is None:
+            continue
+        bucket = profile.freeman_counts.setdefault(feature, {})
+        bucket[value] = bucket.get(value, 0) + 1
+        profile.freeman_totals[feature] = profile.freeman_totals.get(feature, 0) + 1
+
+
 def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileState:
     """Fold `event` into `profile` (mutates and returns it). Call AFTER compute_features."""
     now = to_epoch(event.get(F_TS))
@@ -145,6 +170,8 @@ def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileSt
     _add(event.get(F_BROWSER), profile.seen_browsers)
     if hour is not None:
         profile.seen_hours.add(hour)
+
+    _bump_freeman_counts(profile, event)
 
     success = event.get(F_SUCCESS)
     if now is not None and success is False:

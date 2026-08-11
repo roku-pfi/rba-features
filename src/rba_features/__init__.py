@@ -13,5 +13,11 @@ Public surface:
 """
 
 from rba_features import features, profile, replay, schema  # noqa: F401
+from rba_features.profile import (  # noqa: F401
+    FREEMAN_COUNT_FEATURES,
+    ProfileState,
+    profile_from_dict,
+    profile_to_dict,
+)
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

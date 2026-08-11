@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from rba_features.features import FEATURE_NAMES, compute_features, update_profile
-from rba_features.profile import ProfileState
+from rba_features.profile import ProfileState, profile_from_dict, profile_to_dict
 from rba_features.replay import replay_user
 
 
@@ -96,3 +96,34 @@ def test_offline_online_parity():
     assert offline == online
     for vec in offline:
         assert set(vec) == set(FEATURE_NAMES)
+
+
+def test_profile_roundtrip_and_freeman_counts():
+    """Redis-style JSON roundtrip preserves seen-sets and Freeman per-value counts."""
+    events = _sequence()
+    profile = ProfileState()
+    for ev in events:
+        update_profile(profile, ev)
+
+    assert profile.login_count == len(events)
+    assert profile.freeman_total("ip_address") == len(events)
+    # Two distinct IPs in the sequence (1.1.1.1 and 9.9.9.9).
+    assert set(profile.freeman_counts["ip_address"]) == {"1.1.1.1", "9.9.9.9"}
+    assert profile.freeman_count("hour", "12") >= 1
+
+    restored = profile_from_dict(profile_to_dict(profile))
+    assert restored.login_count == profile.login_count
+    assert restored.seen_ips == profile.seen_ips
+    assert restored.freeman_counts == profile.freeman_counts
+    assert restored.freeman_totals == profile.freeman_totals
+    assert restored.failed_login_ts == profile.failed_login_ts
+
+
+def test_missing_values_skipped_in_freeman_counts():
+    base = datetime(2020, 2, 3, 12, 0, 0)
+    profile = ProfileState()
+    update_profile(profile, _event(base, country="-"))
+    assert "country" not in profile.freeman_counts or profile.freeman_total("country") == 0
+    update_profile(profile, _event(base, country="NO"))
+    assert profile.freeman_count("country", "NO") == 1
+    assert profile.freeman_total("country") == 1
