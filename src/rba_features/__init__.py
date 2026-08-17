@@ -19,5 +19,11 @@ from rba_features.profile import (  # noqa: F401
     profile_from_dict,
     profile_to_dict,
 )
+from rba_features.travel import (  # noqa: F401
+    SPEED_KMH_THRESHOLD,
+    TravelSignals,
+    compute_travel,
+    is_vpn_or_hosting,
+)
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"

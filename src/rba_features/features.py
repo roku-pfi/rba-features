@@ -13,7 +13,9 @@ Contract (do not break):
 
 Feature set (Phase 1, EDA-informed — see docs/findings/2026-08-08-phase1-eda.md):
     faithful per-user "seen-before" signals + a few behavioural ones. RTT and
-    absolute geo distance were intentionally excluded.
+    absolute geo distance were intentionally excluded from Freeman. Country-centroid
+    impossible travel lives in ``rba_features.travel.compute_travel`` as a PDP
+    escalate (ADR-0022), not in FEATURE_NAMES.
 
 Missing values: geo/UA fields use "-" (and NaN) as "missing" in the raw data. A
 missing categorical is treated as "not seen before" (0) and is NOT added to the
@@ -180,5 +182,16 @@ def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileSt
 
     if now is not None:
         profile.last_login_ts = now
+
+    # Travel anchors: successful, non-missing country, not VPN/hosting (ADR-0022).
+    if success is not False:
+        from rba_features.travel import is_vpn_or_hosting, normalize_country
+
+        country = normalize_country(event.get(F_COUNTRY))
+        if country is not None and not is_vpn_or_hosting(event.get(F_ASN)):
+            profile.last_login_country = country
+            if now is not None:
+                profile.last_success_login_ts = now
+
     profile.login_count += 1
     return profile

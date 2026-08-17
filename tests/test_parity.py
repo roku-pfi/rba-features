@@ -117,6 +117,9 @@ def test_profile_roundtrip_and_freeman_counts():
     assert restored.freeman_counts == profile.freeman_counts
     assert restored.freeman_totals == profile.freeman_totals
     assert restored.failed_login_ts == profile.failed_login_ts
+    assert restored.last_login_country == profile.last_login_country == "US"
+    assert restored.last_success_login_ts == profile.last_success_login_ts
+    assert restored.last_success_login_ts == events[2]["login_timestamp"].timestamp()
 
 
 def test_missing_values_skipped_in_freeman_counts():

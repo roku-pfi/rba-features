@@ -6,9 +6,10 @@ training (`rba-ml-training`) and online scoring (`rba-decision-service` /
 `rba-profile-service`). A single implementation is what guarantees **train/serve
 parity** — the top failure mode this project is designed to avoid.
 
-Package version: **0.1.1**. Feature *schema* (names, types, order, version) is
+Package version: **0.1.2**. Feature *schema* (names, types, order, version) is
 frozen in sibling `rba-contracts` as `FEATURE_NAMES` / `FEATURE_SCHEMA_VERSION`
 `1.0.0`. This repo implements the functions; contracts freeze the shape.
+Travel-rule helpers (`compute_travel`) are additive and **not** in FEATURE_NAMES.
 
 > Polyrepo: `github.com/roku-pfi`. Status: [`../docs/plans/status.md`](../docs/plans/status.md).
 > AI orientation: [`AGENTS.md`](AGENTS.md).
@@ -20,9 +21,11 @@ src/rba_features/
 ├── schema.py     # raw Wiefling CSV headers → canonical snake_case LoginEvent
 ├── profile.py    # ProfileState: per-user history + Freeman count buckets
 ├── features.py   # compute_features / update_profile + FEATURE_NAMES
+├── travel.py     # compute_travel (country-centroid PDP rule, not Freeman)
 └── replay.py     # offline driver: past-only vectors for one user's stream
 tests/
-└── test_parity.py  # offline replay vs online-style path — MUST stay green
+├── test_parity.py  # offline replay vs online-style path — MUST stay green
+└── test_travel.py  # centroid teleport + VPN skip (not in FEATURE_NAMES)
 ```
 
 ## Core contract
@@ -45,11 +48,17 @@ Rules (do not break):
 - Missing values (`"-"`, NaN, empty, `"none"` / `"null"`) never count as
   “seen before” and are **not** added to a seen-set.
 
-**Intentionally excluded** (EDA-justified — do not silently re-add):
+**Intentionally excluded from Freeman / FEATURE_NAMES** (EDA-justified):
 
 - `rtt_deviation` — RTT is ~94% missing.
-- Absolute geo distance / `impossible_travel` — geo is synthesised; region/city
-  ~42% missing. Prefer `*_seen_before`.
+- Absolute km / city-level geo / GPS as model inputs — geo is synthesised;
+  region/city ~42% missing. Prefer `*_seen_before`.
+
+**Allowed as a PDP rule, not a Freeman feature** (ADR-0022): country-centroid
+`impossible_travel` in `travel.py`. Same centroid table offline and online;
+missing country never fires; VPN/hosting ASNs skip teleport and set
+`vpn_or_hosting`. `update_profile` stores `last_login_country` /
+`last_success_login_ts` from successful non-VPN logins only.
 
 ## Feature set (`FEATURE_NAMES`)
 
@@ -80,6 +89,8 @@ JSON snapshot via `profile_to_dict` / `profile_from_dict` (Redis payload).
 
 - Seen-sets for the binary `*_seen_before` features.
 - `failed_login_ts` (capped at 256) for the 24h burst count.
+- `last_login_country` / `last_success_login_ts` — travel-rule anchors (successful
+  non-VPN logins only).
 - `freeman_counts` / `freeman_totals` — per-value counts for online Freeman
   LLRs (`ip_address`, `asn`, `country`, `device_type`, `os`, `browser`, `hour`
   as a decimal string). Must stay aligned with `rba_contracts.FREEMAN_FEATURES`
@@ -121,4 +132,5 @@ Python ≥ 3.9 (runtime services use 3.12). Runtime dep: numpy. Dev: pytest, pan
 
 Step 4 complete. Schema, `ProfileState`, the 10-feature compute/update path,
 Freeman count buckets, replay driver, and parity tests are in production use
-on the PDP path. Roadmap: `../docs/plans/status.md`.
+on the PDP path. Demo-1 adds `compute_travel` (country centroids, not Freeman).
+Roadmap: `../docs/plans/status.md`.

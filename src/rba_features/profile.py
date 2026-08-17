@@ -50,6 +50,9 @@ class ProfileState:
 
     login_count: int = 0
     last_login_ts: float | None = None  # epoch seconds of the most recent prior login
+    # Travel-rule anchors (ADR-0022): last *successful* non-VPN login only.
+    last_login_country: str | None = None
+    last_success_login_ts: float | None = None
 
     seen_ips: set[str] = field(default_factory=set)
     seen_asns: set[str] = field(default_factory=set)
@@ -82,6 +85,8 @@ def profile_to_dict(profile: ProfileState) -> dict[str, Any]:
     return {
         "login_count": profile.login_count,
         "last_login_ts": profile.last_login_ts,
+        "last_login_country": profile.last_login_country,
+        "last_success_login_ts": profile.last_success_login_ts,
         "seen_ips": sorted(profile.seen_ips),
         "seen_asns": sorted(profile.seen_asns),
         "seen_countries": sorted(profile.seen_countries),
@@ -104,6 +109,16 @@ def profile_from_dict(data: dict[str, Any] | None) -> ProfileState:
     return ProfileState(
         login_count=int(data.get("login_count", 0)),
         last_login_ts=data.get("last_login_ts"),
+        last_login_country=(
+            str(data["last_login_country"])
+            if data.get("last_login_country") is not None
+            else None
+        ),
+        last_success_login_ts=(
+            float(data["last_success_login_ts"])
+            if data.get("last_success_login_ts") is not None
+            else None
+        ),
         seen_ips=set(data.get("seen_ips") or []),
         seen_asns=set(data.get("seen_asns") or []),
         seen_countries=set(data.get("seen_countries") or []),

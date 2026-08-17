@@ -26,6 +26,7 @@ src/rba_features/
 ├── schema.py     # canonical column names for the Wiefling dataset / LoginEvent
 ├── profile.py    # ProfileState: the per-user history accumulator
 ├── features.py   # feature functions f(event, profile) -> value  (+ FEATURE_NAMES)
+├── travel.py     # country-centroid impossible_travel + VPN skip (PDP rule)
 └── replay.py     # offline replay driver (build past-only training vectors)
 tests/test_parity.py   # offline vs online feature-vector equality — MUST stay green
 ```
@@ -40,8 +41,10 @@ tests/test_parity.py   # offline vs online feature-vector equality — MUST stay
   vectors. Any change here requires updating `tests/test_parity.py` and keeping it green.
 - Missing values (`"-"`, NaN, empty) must NEVER count as "seen before" nor be added to a
   seen-set.
-- Excluded on purpose (EDA-justified): `rtt_deviation` (~94% missing), absolute geo
-  distance / `impossible_travel` (geo synthesised, ~42% missing). Don't silently re-add.
+- Excluded on purpose (EDA-justified): `rtt_deviation` (~94% missing), GPS / city
+  GeoIP as Freeman inputs. Country-centroid `impossible_travel` is a **PDP
+  escalate** in `travel.py` (ADR-0022), not a Freeman feature. Don't silently
+  re-add RTT or city GPS to FEATURE_NAMES.
 
 ## Setup
 
