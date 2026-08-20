@@ -105,8 +105,12 @@ def test_profile_roundtrip_and_freeman_counts():
     for ev in events:
         update_profile(profile, ev)
 
-    assert profile.login_count == len(events)
-    assert profile.freeman_total("ip_address") == len(events)
+    # Only the 3 successful logins establish history; the 2 failures do not
+    # (ADR-0027) — they contribute timestamps to failed_login_ts and nothing else.
+    successes = sum(1 for ev in events if ev.get("login_successful") is not False)
+    assert profile.login_count == successes
+    assert profile.freeman_total("ip_address") == successes
+    assert len(profile.failed_login_ts) == len(events) - successes
     # Two distinct IPs in the sequence (1.1.1.1 and 9.9.9.9).
     assert set(profile.freeman_counts["ip_address"]) == {"1.1.1.1", "9.9.9.9"}
     assert profile.freeman_count("hour", "12") >= 1

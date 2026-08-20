@@ -160,8 +160,32 @@ def _bump_freeman_counts(profile: ProfileState, event: Mapping[str, Any]) -> Non
 
 
 def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileState:
-    """Fold `event` into `profile` (mutates and returns it). Call AFTER compute_features."""
+    """Fold `event` into `profile` (mutates and returns it). Call AFTER compute_features.
+
+    **Only a successful login establishes familiarity** (ADR-0027). A failed
+    attempt contributes exactly one thing — a timestamp in `failed_login_ts` —
+    and touches no seen-set, no Freeman count, no `last_login_ts`, and no
+    `login_count`.
+
+    Without that rule the failure counter is self-defeating: an attacker who
+    submits wrong passwords from their own IP/country/device thereby teaches the
+    profile that their context is normal, so the *next* attempt scores as
+    familiar. Repeated failure would lower risk. It also matches what the
+    travel anchors below have always done, and it costs little honest signal —
+    a legitimate user who mistypes a password succeeds moments later from the
+    same context, which establishes it then.
+
+    A missing/None `login_successful` is treated as a success, as elsewhere.
+    """
+    success = event.get(F_SUCCESS)
     now = to_epoch(event.get(F_TS))
+
+    if success is False:
+        if now is not None:
+            profile.failed_login_ts.append(now)
+            profile.trim_failed()
+        return profile
+
     hour = _hour_of(event.get(F_TS))
 
     _add(event.get(F_IP), profile.seen_ips)
@@ -175,23 +199,17 @@ def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileSt
 
     _bump_freeman_counts(profile, event)
 
-    success = event.get(F_SUCCESS)
-    if now is not None and success is False:
-        profile.failed_login_ts.append(now)
-        profile.trim_failed()
-
     if now is not None:
         profile.last_login_ts = now
 
-    # Travel anchors: successful, non-missing country, not VPN/hosting (ADR-0022).
-    if success is not False:
-        from rba_features.travel import is_vpn_or_hosting, normalize_country
+    # Travel anchors: non-missing country, not VPN/hosting (ADR-0022).
+    from rba_features.travel import is_vpn_or_hosting, normalize_country
 
-        country = normalize_country(event.get(F_COUNTRY))
-        if country is not None and not is_vpn_or_hosting(event.get(F_ASN)):
-            profile.last_login_country = country
-            if now is not None:
-                profile.last_success_login_ts = now
+    country = normalize_country(event.get(F_COUNTRY))
+    if country is not None and not is_vpn_or_hosting(event.get(F_ASN)):
+        profile.last_login_country = country
+        if now is not None:
+            profile.last_success_login_ts = now
 
     profile.login_count += 1
     return profile

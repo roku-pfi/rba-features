@@ -103,17 +103,25 @@ def test_vpn_skips_teleport_and_does_not_move_home_anchor():
     assert profile.last_success_login_ts == ts.timestamp()
 
 
-def test_failed_login_does_not_move_travel_anchor():
+def test_failed_login_establishes_nothing():
+    """ADR-0027: a failure moves no anchor, no clock, and no seen-set.
+
+    Otherwise repeated failure from the attacker's own context would make that
+    context familiar — the failure counter would lower risk instead of raising it.
+    """
     ts = datetime(2020, 6, 1, 12, 0, 0)
+    failed_at = ts + timedelta(hours=1)
     profile = ProfileState()
     update_profile(profile, _event(ts, country="AR"))
-    update_profile(
-        profile,
-        _event(ts + timedelta(hours=1), country="JP", success=False),
-    )
+    update_profile(profile, _event(failed_at, country="JP", success=False))
+
     assert profile.last_login_country == "AR"
     assert profile.last_success_login_ts == ts.timestamp()
-    assert profile.last_login_ts == (ts + timedelta(hours=1)).timestamp()
+    assert profile.last_login_ts == ts.timestamp()
+    assert profile.login_count == 1
+    assert "JP" not in profile.seen_countries
+    assert profile.freeman_count("country", "JP") == 0
+    assert profile.failed_login_ts == [failed_at.timestamp()]
 
 
 def test_travel_offline_online_parity():
