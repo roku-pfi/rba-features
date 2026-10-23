@@ -69,6 +69,11 @@ class ProfileState:
     freeman_counts: dict[str, dict[str, int]] = field(default_factory=dict)
     freeman_totals: dict[str, int] = field(default_factory=dict)
 
+    # Hierarchical Freeman (ADR-0043): per hierarchy, logins and distinct leaves
+    # under each prefix (rba_features.hierarchy). Empty for profiles written before.
+    hier_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    hier_leaves: dict[str, dict[str, int]] = field(default_factory=dict)
+
     def trim_failed(self) -> None:
         if len(self.failed_login_ts) > _MAX_FAILED_TS:
             self.failed_login_ts = self.failed_login_ts[-_MAX_FAILED_TS:]
@@ -99,6 +104,8 @@ def profile_to_dict(profile: ProfileState) -> dict[str, Any]:
             f: dict(counts) for f, counts in profile.freeman_counts.items()
         },
         "freeman_totals": dict(profile.freeman_totals),
+        "hier_counts": {h: dict(c) for h, c in profile.hier_counts.items()},
+        "hier_leaves": {h: dict(c) for h, c in profile.hier_leaves.items()},
     }
 
 
@@ -133,5 +140,13 @@ def profile_from_dict(data: dict[str, Any] | None) -> ProfileState:
         },
         freeman_totals={
             str(f): int(t) for f, t in (data.get("freeman_totals") or {}).items()
+        },
+        hier_counts={
+            str(h): {str(k): int(v) for k, v in c.items()}
+            for h, c in (data.get("hier_counts") or {}).items()
+        },
+        hier_leaves={
+            str(h): {str(k): int(v) for k, v in c.items()}
+            for h, c in (data.get("hier_leaves") or {}).items()
         },
     )

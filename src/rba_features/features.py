@@ -151,6 +151,17 @@ def freeman_value(feature: str, event: Mapping[str, Any]) -> str | None:
     return str(raw)
 
 
+def _bump_hier_counts(profile: ProfileState, event: Mapping[str, Any]) -> None:
+    from rba_features.hierarchy import HIERARCHIES, hier_add, hier_path
+
+    for name in HIERARCHIES:
+        hier_add(
+            profile.hier_counts.setdefault(name, {}),
+            profile.hier_leaves.setdefault(name, {}),
+            hier_path(event, name),
+        )
+
+
 def _bump_freeman_counts(profile: ProfileState, event: Mapping[str, Any]) -> None:
     for feature in FREEMAN_COUNT_FEATURES:
         value = freeman_value(feature, event)
@@ -217,6 +228,7 @@ def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileSt
         profile.seen_hours.add(hour)
 
     _bump_freeman_counts(profile, event)
+    _bump_hier_counts(profile, event)
 
     if now is not None:
         profile.last_login_ts = now
