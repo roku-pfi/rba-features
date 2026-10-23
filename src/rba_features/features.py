@@ -28,6 +28,7 @@ import math
 from datetime import datetime
 from typing import Any, Mapping
 
+from rba_features.canonical import canonical_event
 from rba_features.profile import FREEMAN_COUNT_FEATURES, ProfileState
 
 # Event field names (canonical snake_case; see schema.RAW_TO_FIELD).
@@ -101,6 +102,7 @@ def _seen(value: Any, seen: set) -> int:
 
 def compute_features(event: Mapping[str, Any], profile: ProfileState) -> dict[str, Any]:
     """Return the feature vector for `event` given the user's prior `profile`."""
+    event = canonical_event(event)
     now = to_epoch(event.get(F_TS))
     hour = _hour_of(event.get(F_TS))
 
@@ -134,7 +136,7 @@ def _add(value: Any, seen: set) -> None:
         seen.add(value)
 
 
-def _freeman_value(feature: str, event: Mapping[str, Any]) -> str | None:
+def freeman_value(feature: str, event: Mapping[str, Any]) -> str | None:
     """Value string as Freeman offline scoring would see it (`astype(str)`), or None to skip.
 
     Missing categoricals are skipped so they never inflate user counts (matches
@@ -151,12 +153,28 @@ def _freeman_value(feature: str, event: Mapping[str, Any]) -> str | None:
 
 def _bump_freeman_counts(profile: ProfileState, event: Mapping[str, Any]) -> None:
     for feature in FREEMAN_COUNT_FEATURES:
-        value = _freeman_value(feature, event)
+        value = freeman_value(feature, event)
         if value is None:
             continue
         bucket = profile.freeman_counts.setdefault(feature, {})
         bucket[value] = bucket.get(value, 0) + 1
         profile.freeman_totals[feature] = profile.freeman_totals.get(feature, 0) + 1
+
+
+def learn_at_decision(login_successful: bool | None, enforced_action: str) -> bool:
+    """Whether a decision is folded into the profile when it is made.
+
+    A failed password is recorded at once (it only adds to `failed_login_ts`).
+    A correct password teaches the profile its context only if the login ended
+    in a session: at once when the enforced action is ALLOW; after the step-up
+    is passed when it is REQUIRE_MFA or REAUTHENTICATE (the PDP's
+    `/risk/confirm`, then `update_profile` on the confirmed snapshot); never
+    when it is BLOCK. Otherwise an attacker who has the password but not the
+    passkey would make their own network and country familiar just by trying.
+    """
+    if login_successful is False:
+        return True
+    return enforced_action == "ALLOW"
 
 
 def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileState:
@@ -177,6 +195,7 @@ def update_profile(profile: ProfileState, event: Mapping[str, Any]) -> ProfileSt
 
     A missing/None `login_successful` is treated as a success, as elsewhere.
     """
+    event = canonical_event(event)
     success = event.get(F_SUCCESS)
     now = to_epoch(event.get(F_TS))
 
